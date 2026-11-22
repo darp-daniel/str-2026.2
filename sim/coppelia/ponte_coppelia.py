@@ -279,7 +279,13 @@ def main():
     cena = CenaFalsa(a.dt or 0.01) if a.falso else CenaCoppelia(a.zmq_host, a.zmq_porta, a.dt, a.recriar)
 
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sock.bind(("127.0.0.1", a.porta))
+    try:
+        sock.bind(("127.0.0.1", a.porta))
+    except OSError:
+        sys.exit(f"\nA porta UDP {a.porta} ja esta em uso: outro ponte_coppelia.py continua aberto\n"
+                 "(por exemplo o do --recriar). Feche-o com Ctrl+C naquele terminal, ou rode:\n"
+                 "  Get-Process python | Stop-Process\n"
+                 "e tente de novo. Se for outro programa, use --porta N aqui e no sim_bus --planta coppelia:N.")
     print(f"ponte_coppelia: {cena.descricao()}, esperando o sim_bus em UDP {a.porta} (Ctrl+C sai)", flush=True)
 
     ativo = False
