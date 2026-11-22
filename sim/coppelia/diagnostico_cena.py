@@ -94,7 +94,9 @@ def main():
     dt = sim.getSimulationTimeStep()
     cfg = tentar(lambda: sim.callScriptFunction("str_config", script, {}), {})
     pdt = tentar(lambda: sim.getFloatParam(sim.floatparam_physicstimestep))
-    print(f"\njunta motriz em modo {'FORCA/TORQUE' if cfg.get('modo_forca') else 'velocidade (antigo)'}; "
+    cin = cfg.get("modo") == "cinematico"
+    print(f"\nmovimento: {'CINEMATICO (mesmas equacoes do modelo 1D)' if cin else 'BULLET (corpo rigido)'}; "
+          f"junta motriz em modo {'FORCA/TORQUE' if cfg.get('modo_forca') else 'velocidade'}; "
           f"passo da cena {dt * 1000:.0f} ms; passo da fisica {pdt * 1000 if pdt else '?'} ms")
 
     def trecho(torque, segundos):
@@ -127,7 +129,7 @@ def main():
     p2 = sim.getObjectPosition(chassi, sim.handle_world)
     sim.stopSimulation()
 
-    m_carro = 1580.0
+    m_carro = 1500.0 if cin else 1580.0
     ideal = lambda T: T / 0.31 / m_carro
     print("\n  trecho                         v ini -> fim km/h   aceleracao m/s2   ideal   patinagem")
     for nome, t, T in (("2000 N.m, 3 s", a1, 2000), ("sem torque, motorista ON", c_on, 0),
@@ -143,7 +145,7 @@ def main():
     # ---------------------------------------------------------- 3. diagnóstico
     print("\nconclusao:")
     esperado = 0.5 * (2000 / 0.31 / 1540) * 9  # ~26 m em 3 s sem perdas
-    if estatica_chassi == 1:
+    if estatica_chassi == 1 and cin is False:
         print("  O CHASSI ESTA ESTATICO: a fisica nao mexe nele (fica congelado no ar).")
         print("  A cena foi criada por uma versao antiga do script. Recrie com:")
         print("    python sim/coppelia/ponte_coppelia.py --recriar   (depois Ctrl+C)")

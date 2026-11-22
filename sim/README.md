@@ -189,6 +189,21 @@ duracao 20                 # segundos
   do ESP-IDF, e o adaptador foi testado com uma cena falsa. A API Lua do
   CoppeliaSim mudou entre 4.6, 4.7 e 4.8; os pontos sensíveis têm
   alternativas no código.
+- **Como o carro se move no CoppeliaSim** (`MODO` no topo de
+  `coppelia/cena_carro.lua`; vale ao recriar a cena com `--recriar`):
+  - `cinematico` (padrão): o carro anda pelas mesmas equações do modelo 1D
+    (`nucleo/modelos.cpp`). O CoppeliaSim desenha o carro, gira as rodas,
+    acende os LEDs e mostra a janela de controle. O resultado é
+    determinístico e bate com a referência interna.
+  - `bullet`: corpo rígido com rodas e contato no motor de física. No
+    CoppeliaSim 4.10, o teste extenso e o `diagnostico_cena.py` mediram três
+    problemas:
+    - o pneu do Bullet patina 50–60 % acelerando, mesmo com atrito 1,0;
+    - rolando sem torque, o carro perde ~0,6 m/s² (~4× o modelo);
+    - sem direção, o carro sai da pista em segundos sem o "motorista virtual".
+
+    Fica disponível para estudo. Os prazos da ESP são verificados do mesmo
+    jeito nos dois modos.
 - O PC e o CoppeliaSim não são de tempo real. O HIL verifica as garantias
   **da ESP32**, não do sistema inteiro.
 - Em aceleração forte, a queda de tensão R·I sozinha leva o pino abaixo dos

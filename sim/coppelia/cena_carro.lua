@@ -33,9 +33,21 @@ local SENTIDO = 1          -- troque para -1 se o carro andar de ré
 local RAIO = 0.31          -- m (igual ao modelo C++)
 local TORQUE_SEM_PONTE = 2000 -- N·m nas rodas com o pedal no fundo (modo autônomo)
 
+-- Como o carro se move (vale ao (re)criar a cena: ponte_coppelia.py --recriar):
+--  'cinematico' (padrão): anda pelas MESMAS equações do modelo 1D do sim_bus
+--     (tração T/r, arrasto, rolamento; massa 1500 kg). Determinístico; o
+--     CoppeliaSim mostra o carro, gira as rodas e dá a janela de controle.
+--  'bullet': corpo rígido com rodas e contato no motor de física. Serve para
+--     estudar, mas no 4.10 o pneu do Bullet patina 50-60 %, rola com ~4x a
+--     resistência do modelo e o carro sem direção precisa de um "motorista"
+--     (veja sim/README.md, limitações).
+local MODO = 'cinematico'
+local VEIC = {m = 1500, cd = 0.30, area = 2.2, rho = 1.2, crr = 0.012, g = 9.81} -- = ParametrosVeiculo (C++)
+
 local C = {
     ign = false, pai = true, ped = 0.0, desc = false, camera = true, cmd = 0, motorista = true,
     ultimaTroca = -1, carroAnt = nil, ui = nil, h = {},
+    v = 0.0, ang = 0.0, T = 0.0, x0 = {0, 0, 0.75}, -- estado do modo cinemático
 }
 
 -- ------------------------------------------------------------ compatibilidade
@@ -118,11 +130,15 @@ end
 
 local function roda(chassi, nome, x, y, motriz)
     local d, l = 2 * RAIO, 0.22
-    local j = sim.createJoint(sim.joint_revolute, sim.jointmode_dynamic, 0, {0.15, 0.05})
+    local cin = MODO == 'cinematico'
+    local modo_j = cin and (sim.jointmode_kinematic or sim.jointmode_passive) or sim.jointmode_dynamic
+    local j = sim.createJoint(sim.joint_revolute, modo_j, 0, {0.15, 0.05})
     setPos(j, {x, y, RAIO})
     setOri(j, {-math.pi / 2, 0, 0})       -- eixo z da junta = +y do carro
     sim.setObjectAlias(j, 'junta_' .. nome)
-    if motriz then
+    if cin then
+        -- girada por setJointPosition a cada passo
+    elseif motriz then
         -- Modo força/torque (4.5+): a junta aplica exatamente o torque pedido.
         -- No modo velocidade o motor segue um perfil até a velocidade-alvo e,
         -- com o alvo mudando a cada passo, segurava a roda em vez de empurrar.
@@ -141,7 +157,7 @@ local function roda(chassi, nome, x, y, motriz)
         end
     end
     local r = forma(sim.primitiveshape_cylinder, {d, d, l}, {x, y, RAIO}, {0.1, 0.1, 0.1}, 20,
-                    'roda_' .. nome, OPT_RESPONDABLE)
+                    'roda_' .. nome, cin and OPT_STATIC or OPT_RESPONDABLE)
     atrito(r, MU_PNEU)
     semColisaoInterna(r)
     setOri(r, {-math.pi / 2, 0, 0})
@@ -176,7 +192,7 @@ local function construirCarro()
     end
 
     local chassi = forma(sim.primitiveshape_cuboid, {4.2, 1.8, 0.5}, {0, 0, 0.75}, {0.10, 0.35, 0.75}, 1500,
-                         'CarroEV', OPT_RESPONDABLE)
+                         'CarroEV', MODO == 'cinematico' and OPT_STATIC or OPT_RESPONDABLE)
     semColisaoInterna(chassi)
     -- visual: estática presa ao chassi (dinâmica solta cairia do carro)
     local cabine = forma(sim.primitiveshape_cuboid, {2.0, 1.6, 0.45}, {-0.3, 0, 1.22}, {0.75, 0.85, 0.95}, nil,
@@ -216,6 +232,9 @@ local function pegarHandles()
     h.chassi = sim.getObject('/CarroEV')
     h.te = sim.getObject('/CarroEV/junta_TE')
     h.td = sim.getObject('/CarroEV/junta_TD')
+    h.de = sim.getObject('/CarroEV/junta_DE')
+    h.dd = sim.getObject('/CarroEV/junta_DD')
+    C.x0 = sim.getObjectPosition(h.chassi, sim.handle_world)
     for _, n in ipairs({'ignicao', 'painel', 'alarme', 'bloqueio', 'bateria', 'enlace'}) do
         h[n] = sim.getObject('/CarroEV/led_' .. n)
     end
@@ -267,6 +286,10 @@ function ui_atualizar() C.cmd = 3 end
 -- ------------------------------------------------------------ física/atuação
 local function aplicarTorque(T)
     local h = C.h
+    if MODO == 'cinematico' then
+        C.T = T -- aplicado em passoCinematico, dentro do passo da simulação
+        return
+    end
     local lin = sim.getObjectVelocity(h.chassi)
     local w_carro = math.sqrt(lin[1] ^ 2 + lin[2] ^ 2) / RAIO
     if T < 0 and w_carro < 0.5 then T = 0 end -- regeneração não dá ré
@@ -282,12 +305,33 @@ local function aplicarTorque(T)
 end
 
 local function velocidadeCarro()
+    if MODO == 'cinematico' then return C.v end
     local lin = sim.getObjectVelocity(C.h.chassi)
     return math.sqrt(lin[1] ^ 2 + lin[2] ^ 2)
 end
 
 local function wRoda()
+    if MODO == 'cinematico' then return C.v / RAIO end
     return SENTIDO * (sim.getJointVelocity(C.h.te) + sim.getJointVelocity(C.h.td)) / 2
+end
+
+-- Mesmo integrador de ModeloVeiculo::passo (sim/nucleo/modelos.cpp).
+local function passoCinematico(dt)
+    local h, v = C.h, C.v
+    local F = C.T / RAIO - 0.5 * VEIC.rho * VEIC.cd * VEIC.area * v * v
+              - (v > 0 and VEIC.crr * VEIC.m * VEIC.g or 0)
+    C.v = math.max(0, v + F / VEIC.m * dt) -- o atrito para o carro, não o empurra para trás
+    local p = sim.getObjectPosition(h.chassi, sim.handle_world)
+    setPos(h.chassi, {p[1] + C.v * dt, C.x0[2], C.x0[3]})
+    C.ang = (C.ang + C.v / RAIO * dt) % (2 * math.pi)
+    for _, j in ipairs({h.te, h.td, h.de, h.dd}) do sim.setJointPosition(j, SENTIDO * C.ang) end
+end
+
+local function reiniciarCinematico()
+    if MODO ~= 'cinematico' then return end
+    C.v, C.ang, C.T = 0.0, 0.0, 0.0
+    setPos(C.h.chassi, C.x0)
+    for _, j in ipairs({C.h.te, C.h.td, C.h.de, C.h.dd}) do sim.setJointPosition(j, 0) end
 end
 
 local CINZA, VERDE, VERMELHO = {0.3, 0.3, 0.3}, {0.1, 0.9, 0.1}, {0.95, 0.1, 0.1}
@@ -328,7 +372,7 @@ end
 function str_config(c)
     c = c or {}
     if c.motorista ~= nil then C.motorista = c.motorista ~= 0 end
-    return {motorista = C.motorista and 1 or 0, modo_forca = C.modo_forca and 1 or 0}
+    return {motorista = C.motorista and 1 or 0, modo_forca = C.modo_forca and 1 or 0, modo = MODO}
 end
 
 function str_trocar(s)
@@ -367,8 +411,27 @@ function sysCall_cleanup()
     if C.ui then simUI.destroy(C.ui) end
 end
 
+-- cada simulação começa com o carro parado na largada
+function sysCall_beginSimulation() reiniciarCinematico() end
+function sysCall_afterSimulation() reiniciarCinematico() end
+
 function sysCall_actuation()
     local h = C.h
+    -- Modo autônomo: sem a ponte há mais de 0,5 s, o acelerador age direto.
+    if C.ultimaTroca < 0 or sim.getSystemTime() - C.ultimaTroca > 0.5 then
+        local T = C.ign and C.ped * TORQUE_SEM_PONTE or 0
+        aplicarTorque(T)
+        atualizarLeds({alarme = 0, bloqueio = 0, nivel = 0, tem_rx = 0})
+        if C.ui then
+            simUI.setLabelText(C.ui, 20, string.format('Velocidade %.1f km/h (cena sem a ponte)', velocidadeCarro() * 3.6))
+            simUI.setLabelText(C.ui, 21, 'Ponte desligada: sem ESP, sem bloqueio.')
+        end
+    end
+    if MODO == 'cinematico' then
+        passoCinematico(sim.getSimulationTimeStep())
+        return
+    end
+
     -- arrasto aerodinâmico (o motor de física não tem): F = -1/2 rho Cd A |v| v
     local lin = sim.getObjectVelocity(h.chassi)
     local k = 0.5 * 1.2 * 0.30 * 2.2
@@ -392,16 +455,6 @@ function sysCall_actuation()
         sim.addForceAndTorque(h.chassi, nil, {0, 0, Tz})
     end
 
-    -- Modo autônomo: sem a ponte há mais de 0,5 s, o acelerador age direto.
-    if C.ultimaTroca < 0 or sim.getSystemTime() - C.ultimaTroca > 0.5 then
-        local T = C.ign and C.ped * TORQUE_SEM_PONTE or 0
-        aplicarTorque(T)
-        atualizarLeds({alarme = 0, bloqueio = 0, nivel = 0, tem_rx = 0})
-        if C.ui then
-            simUI.setLabelText(C.ui, 20, string.format('Velocidade %.1f km/h (cena sem a ponte)', velocidadeCarro() * 3.6))
-            simUI.setLabelText(C.ui, 21, 'Ponte desligada: sem ESP, sem bloqueio.')
-        end
-    end
 end
 
 function sysCall_sensing()
