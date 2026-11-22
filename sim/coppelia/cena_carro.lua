@@ -96,6 +96,16 @@ local function atrito(h, mu)
     pcall(sim.resetDynamicObject, h)
 end
 
+-- Peças do carro não colidem entre si, só com a pista. A máscara padrão
+-- (0xffff) faz peças do mesmo carro colidirem; com a margem de colisão do
+-- Bullet a roda raspava no chassi e freava o carro (teste extenso: 42 -> 13
+-- km/h em 4 s sem torque, contra 57 -> 54 no modelo). 0xff00 = só a parte global.
+local function semColisaoInterna(h)
+    pcall(sim.setObjectInt32Param, h, sim.shapeintparam_respondable_mask, 0xff00)
+    if sim.setIntProperty then pcall(sim.setIntProperty, h, 'respondableMask', 0xff00) end
+    pcall(sim.resetDynamicObject, h)
+end
+
 local function forma(tipo, tam, pos, rgb, massa, nome, opcoes)
     local h = sim.createPrimitiveShape(tipo, tam, opcoes)
     fisica(h, opcoes)
@@ -126,6 +136,7 @@ local function roda(chassi, nome, x, y, motriz)
     local r = forma(sim.primitiveshape_cylinder, {d, d, l}, {x, y, RAIO}, {0.1, 0.1, 0.1}, 20,
                     'roda_' .. nome, OPT_RESPONDABLE)
     atrito(r, MU_PNEU)
+    semColisaoInterna(r)
     setOri(r, {-math.pi / 2, 0, 0})
     sim.setObjectParent(r, j, true)
     sim.setObjectParent(j, chassi, true)
@@ -159,15 +170,16 @@ local function construirCarro()
 
     local chassi = forma(sim.primitiveshape_cuboid, {4.2, 1.8, 0.5}, {0, 0, 0.75}, {0.10, 0.35, 0.75}, 1500,
                          'CarroEV', OPT_RESPONDABLE)
+    semColisaoInterna(chassi)
     -- visual: estática presa ao chassi (dinâmica solta cairia do carro)
     local cabine = forma(sim.primitiveshape_cuboid, {2.0, 1.6, 0.45}, {-0.3, 0, 1.22}, {0.75, 0.85, 0.95}, nil,
                          'cabine', OPT_STATIC)
     sim.setObjectParent(cabine, chassi, true)
 
-    roda(chassi, 'TE', -1.35, 1.02, true)
-    roda(chassi, 'TD', -1.35, -1.02, true)
-    roda(chassi, 'DE', 1.35, 1.02, false)
-    roda(chassi, 'DD', 1.35, -1.02, false)
+    roda(chassi, 'TE', -1.35, 1.05, true)
+    roda(chassi, 'TD', -1.35, -1.05, true)
+    roda(chassi, 'DE', 1.35, 1.05, false)
+    roda(chassi, 'DD', 1.35, -1.05, false)
 
     local nomes = {'led_ignicao', 'led_painel', 'led_alarme', 'led_bloqueio', 'led_bateria', 'led_enlace'}
     for i, n in ipairs(nomes) do

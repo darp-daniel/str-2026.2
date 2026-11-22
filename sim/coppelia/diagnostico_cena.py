@@ -64,6 +64,8 @@ def main():
             massa = tentar(lambda: sim.getShapeMass(h))
             atr = tentar(lambda: sim.getEngineFloatParam(sim.bullet_body_friction, h))
             atr = f"{atr:.2f}" if isinstance(atr, (int, float)) else "?"
+            msk = tentar(lambda: sim.getObjectInt32Param(h, sim.shapeintparam_respondable_mask))
+            atr += f" mascara={hex(msk) if isinstance(msk, int) else '?'}"
             print(f"  forma  {nome:14s} estatica={est} respondable={resp} massa={massa if massa is None else round(massa)} "
                   f"atrito(bullet)={atr} {pos}")
         elif tipo == joint_t:
@@ -102,7 +104,17 @@ def main():
         max_w = max(max_w, w / 2)
     p1 = sim.getObjectPosition(chassi, sim.handle_world)
     alvo = (tentar(lambda: sim.getJointTargetVelocity(te)), tentar(lambda: sim.getJointTargetForce(te)))
+
+    # 2 s sem torque: quanto o carro perde de velocidade "sozinho"
+    v_ini = ret.get("vel", 0.0) if isinstance(ret, dict) else 0.0
+    for k in range(int(2.0 / dt)):
+        ret2 = sim.callScriptFunction("str_trocar", script, {
+            "torque": 0.0, "f_ign": 1, "f_pai": 1, "f_ped": 0.0, "bloqueio": 0, "alarme": 0, "nivel": 0,
+            "motivo": 0, "tem_rx": 0, "v_pino": 3.3, "soc": 0.9, "corrente": 0.0, "status": "diagnostico"})
+        sim.step()
+    v_fim = ret2.get("vel", 0.0)
     sim.stopSimulation()
+    desac = (v_ini - v_fim) / 2.0
 
     desloc = math.dist(p0[:2], p1[:2])
     print(f"  passo da cena: {dt * 1000:.0f} ms, {passos} passos")
@@ -110,6 +122,8 @@ def main():
           f"(x {p0[0]:.2f} -> {p1[0]:.2f})")
     print(f"  rodas traseiras: |w| maximo {max_w:.1f} rad/s; alvo da junta (vel, forca) = {alvo}")
     print(f"  str_trocar devolveu: {ret}")
+    print(f"  depois, 2 s sem torque: {v_ini * 3.6:.1f} -> {v_fim * 3.6:.1f} km/h, "
+          f"desaceleracao {desac:.2f} m/s^2 (modelo: ~0,2; acima de 0,8 algo freia o carro)")
 
     # ---------------------------------------------------------- 3. diagnóstico
     print("\nconclusao:")
@@ -120,7 +134,10 @@ def main():
         print("    python sim/coppelia/ponte_coppelia.py --recriar   (depois Ctrl+C)")
         print("  e rode este diagnostico de novo.")
     elif desloc > 3:
-        print(f"  A FISICA ESTA OK: com torque o carro anda ({desloc:.1f} m; ideal ~{esperado:.0f} m).")
+        print(f"  COM TORQUE O CARRO ANDA ({desloc:.1f} m; ideal ~{esperado:.0f} m).")
+        if desac > 0.8:
+            print(f"  MAS ALGO FREIA O CARRO: {desac:.2f} m/s^2 sem torque. Rodas raspando no chassi?")
+            print("  Veja 'mascara' das rodas e do chassi acima (deveria ser 0xff00) e recrie a cena.")
         print("  O problema esta no controle. Confira na janela 'Carro STR':")
         print("   - 'Ignicao ligada' marcada? sem ignicao o torque e zero;")
         print("   - esfera de bloqueio (4a do teto) vermelha? bloqueado o torque e zero;")
