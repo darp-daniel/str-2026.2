@@ -123,9 +123,16 @@ local function roda(chassi, nome, x, y, motriz)
     setOri(j, {-math.pi / 2, 0, 0})       -- eixo z da junta = +y do carro
     sim.setObjectAlias(j, 'junta_' .. nome)
     if motriz then
-        sim.setObjectInt32Param(j, sim.jointintparam_dynctrlmode, sim.jointdynctrl_velocity)
-        pcall(sim.setObjectInt32Param, j, sim.jointintparam_motor_enabled, 1)
-        sim.setJointTargetVelocity(j, 0)
+        -- Modo força/torque (4.5+): a junta aplica exatamente o torque pedido.
+        -- No modo velocidade o motor segue um perfil até a velocidade-alvo e,
+        -- com o alvo mudando a cada passo, segurava a roda em vez de empurrar.
+        local ok = sim.jointdynctrl_force ~= nil and
+                   pcall(sim.setObjectInt32Param, j, sim.jointintparam_dynctrlmode, sim.jointdynctrl_force)
+        if not ok then
+            sim.setObjectInt32Param(j, sim.jointintparam_dynctrlmode, sim.jointdynctrl_velocity)
+            pcall(sim.setObjectInt32Param, j, sim.jointintparam_motor_enabled, 1)
+            sim.setJointTargetVelocity(j, 0)
+        end
         sim.setJointTargetForce(j, 0)
     else
         if not pcall(sim.setObjectInt32Param, j, sim.jointintparam_dynctrlmode, sim.jointdynctrl_free) then
@@ -213,6 +220,8 @@ local function pegarHandles()
         h[n] = sim.getObject('/CarroEV/led_' .. n)
     end
     h.camera = acharCamera()
+    local ok, modo = pcall(sim.getObjectInt32Param, h.te, sim.jointintparam_dynctrlmode)
+    C.modo_forca = ok and sim.jointdynctrl_force ~= nil and modo == sim.jointdynctrl_force
 end
 
 -- ------------------------------------------------------------ interface
@@ -258,24 +267,17 @@ function ui_atualizar() C.cmd = 3 end
 -- ------------------------------------------------------------ física/atuação
 local function aplicarTorque(T)
     local h = C.h
-    local por_roda = math.abs(T) / 2
-    -- A junta está em modo velocidade com força máxima = torque pedido: enquanto
-    -- a roda gira abaixo do alvo, o motor entrega exatamente T. O alvo faz o
-    -- papel do controle de tração (TCS) e do ABS de um carro elétrico real: a
-    -- roda pode girar no máximo 5 % + 2 rad/s acima do que o carro anda (antes,
-    -- alvo fixo de 300 rad/s: a roda disparava ao perder aderência, patinagem
-    -- de até 1290 % no teste extenso) e, freando, não trava.
     local lin = sim.getObjectVelocity(h.chassi)
     local w_carro = math.sqrt(lin[1] ^ 2 + lin[2] ^ 2) / RAIO
-    local alvo = 0
-    if T > 0 then
-        alvo = SENTIDO * (w_carro * 1.05 + 2.0)
-    elseif T < 0 then
-        alvo = SENTIDO * math.max(0, w_carro * 0.90 - 1.0)
-    end
+    if T < 0 and w_carro < 0.5 then T = 0 end -- regeneração não dá ré
     for _, j in ipairs({h.te, h.td}) do
-        sim.setJointTargetVelocity(j, alvo)
-        sim.setJointTargetForce(j, por_roda)
+        if C.modo_forca then
+            sim.setJointTargetForce(j, SENTIDO * T / 2) -- torque com sinal, por roda
+        else
+            -- modo velocidade (CoppeliaSim antigo): alvo alto, quem limita é a força
+            sim.setJointTargetVelocity(j, T > 0 and SENTIDO * 300 or 0)
+            sim.setJointTargetForce(j, math.abs(T) / 2)
+        end
     end
 end
 
@@ -322,6 +324,13 @@ local function atualizarTexto(s)
 end
 
 -- Chamada pela ponte (ponte_coppelia.py) uma vez por passo, ANTES de sim.step().
+-- Ajustes para o diagnóstico: str_config({motorista = 0|1}); devolve o estado.
+function str_config(c)
+    c = c or {}
+    if c.motorista ~= nil then C.motorista = c.motorista ~= 0 end
+    return {motorista = C.motorista and 1 or 0, modo_forca = C.modo_forca and 1 or 0}
+end
+
 function str_trocar(s)
     s = s or {}
     if s.f_ign and s.f_ign >= 0 then C.ign = s.f_ign > 0.5 end

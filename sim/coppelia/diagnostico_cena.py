@@ -87,44 +87,59 @@ def main():
     td = sim.getObject("/CarroEV/junta_TD")
 
     # ---------------------------------------------------------- 2. teste dinâmico
-    print("\nteste: 3 s com torque de 2000 N.m nas rodas traseiras (ignicao ON, sem bloqueio)")
+    # Roteiro (12 s): acelera 3 s, rola 2 s sem torque (motorista ligado),
+    # acelera 2 s, rola 2 s sem torque (motorista desligado), acelera 3 s a 1125 N.m.
     tentar(lambda: sim.setStepping(True)) if hasattr(sim, "setStepping") else cliente.setStepping(True)
     sim.startSimulation()
     dt = sim.getSimulationTimeStep()
+    cfg = tentar(lambda: sim.callScriptFunction("str_config", script, {}), {})
+    pdt = tentar(lambda: sim.getFloatParam(sim.floatparam_physicstimestep))
+    print(f"\njunta motriz em modo {'FORCA/TORQUE' if cfg.get('modo_forca') else 'velocidade (antigo)'}; "
+          f"passo da cena {dt * 1000:.0f} ms; passo da fisica {pdt * 1000 if pdt else '?'} ms")
+
+    def trecho(torque, segundos):
+        r, pat, n = {}, [], int(round(segundos / dt))
+        v0 = None
+        for _ in range(n):
+            r = sim.callScriptFunction("str_trocar", script, {
+                "torque": torque, "f_ign": 1, "f_pai": 1, "f_ped": 0.5 if torque > 0 else 0.0,
+                "bloqueio": 0, "alarme": 0, "nivel": 0, "motivo": 0, "tem_rx": 0,
+                "v_pino": 3.3, "soc": 0.9, "corrente": 0.0, "status": "diagnostico"})
+            sim.step()
+            if v0 is None:
+                v0 = r.get("vel", 0.0)
+            v, w = r.get("vel", 0.0), r.get("w", 0.0) * 0.31
+            if torque > 0 and v > 1.0:
+                pat.append(abs(w - v) / v)
+        v1 = r.get("vel", 0.0)
+        pat.sort()
+        return v0, v1, (v1 - v0) / segundos, (pat[len(pat) // 2] if pat else float("nan")), r
+
     p0 = sim.getObjectPosition(chassi, sim.handle_world)
-    max_w, ret = 0.0, {}
-    passos = int(3.0 / dt)
-    for k in range(passos):
-        ret = sim.callScriptFunction("str_trocar", script, {
-            "torque": 2000.0, "f_ign": 1, "f_pai": 1, "f_ped": 0.5,
-            "bloqueio": 0, "alarme": 0, "nivel": 0, "motivo": 0, "tem_rx": 0,
-            "v_pino": 3.3, "soc": 0.9, "corrente": 0.0, "status": "diagnostico"})
-        sim.step()
-        w = abs(sim.getJointVelocity(te)) + abs(sim.getJointVelocity(td))
-        max_w = max(max_w, w / 2)
+    a1 = trecho(2000.0, 3.0)
     p1 = sim.getObjectPosition(chassi, sim.handle_world)
-    alvo = (tentar(lambda: sim.getJointTargetVelocity(te)), tentar(lambda: sim.getJointTargetForce(te)))
-
-    # 2 s sem torque: quanto o carro perde de velocidade "sozinho"
-    v_ini = ret.get("vel", 0.0) if isinstance(ret, dict) else 0.0
-    for k in range(int(2.0 / dt)):
-        ret2 = sim.callScriptFunction("str_trocar", script, {
-            "torque": 0.0, "f_ign": 1, "f_pai": 1, "f_ped": 0.0, "bloqueio": 0, "alarme": 0, "nivel": 0,
-            "motivo": 0, "tem_rx": 0, "v_pino": 3.3, "soc": 0.9, "corrente": 0.0, "status": "diagnostico"})
-        sim.step()
-    v_fim = ret2.get("vel", 0.0)
+    c_on = trecho(0.0, 2.0)
+    a2 = trecho(2000.0, 2.0)
+    tentar(lambda: sim.callScriptFunction("str_config", script, {"motorista": 0}))
+    c_off = trecho(0.0, 2.0)
+    tentar(lambda: sim.callScriptFunction("str_config", script, {"motorista": 1}))
+    a3 = trecho(1125.0, 3.0)
+    p2 = sim.getObjectPosition(chassi, sim.handle_world)
     sim.stopSimulation()
-    desac = (v_ini - v_fim) / 2.0
 
+    m_carro = 1580.0
+    ideal = lambda T: T / 0.31 / m_carro
+    print("\n  trecho                         v ini -> fim km/h   aceleracao m/s2   ideal   patinagem")
+    for nome, t, T in (("2000 N.m, 3 s", a1, 2000), ("sem torque, motorista ON", c_on, 0),
+                       ("2000 N.m, 2 s", a2, 2000), ("sem torque, motorista OFF", c_off, 0),
+                       ("1125 N.m (pedal 0,5), 3 s", a3, 1125)):
+        id_ = ideal(T) if T else -0.14
+        pat = f"{100 * t[3]:.0f} %" if t[3] == t[3] else "-"
+        print(f"  {nome:28s} {t[0] * 3.6:7.1f} -> {t[1] * 3.6:5.1f}      {t[2]:+6.2f}          {id_:+5.2f}   {pat}")
+    print(f"  chassi: z {p0[2]:.2f} -> {p2[2]:.2f} m; desvio lateral final {p2[1]:+.2f} m")
     desloc = math.dist(p0[:2], p1[:2])
-    print(f"  passo da cena: {dt * 1000:.0f} ms, {passos} passos")
-    print(f"  chassi: z {p0[2]:.2f} -> {p1[2]:.2f} m, andou {desloc:.2f} m em x/y "
-          f"(x {p0[0]:.2f} -> {p1[0]:.2f})")
-    print(f"  rodas traseiras: |w| maximo {max_w:.1f} rad/s; alvo da junta (vel, forca) = {alvo}")
-    print(f"  str_trocar devolveu: {ret}")
-    print(f"  depois, 2 s sem torque: {v_ini * 3.6:.1f} -> {v_fim * 3.6:.1f} km/h, "
-          f"desaceleracao {desac:.2f} m/s^2 (modelo: ~0,2; acima de 0,8 algo freia o carro)")
-
+    desac = -min(c_on[2], c_off[2])
+    max_w = max(a1[4].get("w", 0.0), 0.0)
     # ---------------------------------------------------------- 3. diagnóstico
     print("\nconclusao:")
     esperado = 0.5 * (2000 / 0.31 / 1540) * 9  # ~26 m em 3 s sem perdas
@@ -134,11 +149,17 @@ def main():
         print("    python sim/coppelia/ponte_coppelia.py --recriar   (depois Ctrl+C)")
         print("  e rode este diagnostico de novo.")
     elif desloc > 3:
-        print(f"  COM TORQUE O CARRO ANDA ({desloc:.1f} m; ideal ~{esperado:.0f} m).")
-        if desac > 0.8:
-            print(f"  MAS ALGO FREIA O CARRO: {desac:.2f} m/s^2 sem torque. Rodas raspando no chassi?")
-            print("  Veja 'mascara' das rodas e do chassi acima (deveria ser 0xff00) e recrie a cena.")
-        print("  O problema esta no controle. Confira na janela 'Carro STR':")
+        print(f"  COM TORQUE O CARRO ANDA ({desloc:.1f} m em 3 s; ideal ~{esperado:.0f} m).")
+        ef = a3[2] / ideal(1125)
+        print(f"  aceleracao com 1125 N.m: {100 * ef:.0f} % da ideal "
+              f"({'OK' if ef > 0.8 else 'BAIXA: o torque nao esta chegando inteiro ao chao'})")
+        print(f"  sem torque: {-c_on[2]:.2f} m/s^2 com motorista, {-c_off[2]:.2f} sem "
+              f"(modelo ~0,14; {'OK' if desac < 0.35 else 'ALTA: algo freia o carro'})")
+        if desac >= 0.35 and -c_off[2] < 0.6 * -c_on[2]:
+            print("  -> o motorista virtual e quem freia.")
+        elif desac >= 0.35:
+            print("  -> nao e o motorista: e o contato roda-pista do motor de fisica (resistencia ao rolamento).")
+        print("  Se o carro nao anda na corrida com a ponte, confira na janela 'Carro STR':")
         print("   - 'Ignicao ligada' marcada? sem ignicao o torque e zero;")
         print("   - esfera de bloqueio (4a do teto) vermelha? bloqueado o torque e zero;")
         print("     (desmarcar 'Painel conforme' dispara o alarme e bloqueia em 5 s)")
