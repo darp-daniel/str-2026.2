@@ -113,7 +113,7 @@ class CenaFalsa:
 
 
 class CenaCoppelia:
-    def __init__(self, host, porta_zmq, dt):
+    def __init__(self, host, porta_zmq, dt, recriar=False):
         try:
             from coppeliasim_zmqremoteapi_client import RemoteAPIClient
         except ImportError:
@@ -125,8 +125,40 @@ class CenaCoppelia:
         except AttributeError:
             self.sim = self.cliente.getObject("sim")  # cliente 1.x
         self.dt_pedido = dt
+        try:
+            v = self.sim.getInt32Param(self.sim.intparam_program_full_version)
+            print(f"CoppeliaSim versao {v // 1000000}.{v // 10000 % 100}.{v // 100 % 100} rev {v % 100}")
+        except Exception:
+            pass
+        if recriar:
+            self._remover_cena_antiga()
         self.script = self._achar_ou_criar_script()
         self.rodando = False
+        self.tempos_ms = []
+        self._diagnostico()
+
+    def _remover_cena_antiga(self):
+        sim = self.sim
+        for caminho in ("/CarroSTR", "/CarroEV", "/Pista"):
+            try:
+                h = sim.getObject(caminho)
+            except Exception:
+                continue
+            try:
+                arvore = sim.getObjectsInTree(h)
+                sim.removeObjects(arvore)
+                print(f"removido {caminho} ({len(arvore)} objetos)")
+            except Exception as e:
+                print(f"aviso: nao consegui remover {caminho}: {e}")
+
+    def _diagnostico(self):
+        sim = self.sim
+        try:
+            h = sim.getObject("/CarroEV")
+            p = sim.getObjectPosition(h, sim.handle_world)
+            print(f"carro /CarroEV em x={p[0]:.1f} y={p[1]:.1f} z={p[2]:.2f} m")
+        except Exception:
+            print("aviso: /CarroEV nao existe na cena (o script do carro nao rodou?)")
 
     def descricao(self):
         return "CoppeliaSim"
@@ -159,7 +191,7 @@ class CenaCoppelia:
         print("/CarroSTR nao encontrado: criando o carro e o script na cena aberta ...")
         sim = self.sim
         codigo = open(os.path.join(AQUI, "cena_carro.lua"), encoding="utf-8").read()
-        dummy = sim.createDummy(0.1)
+        dummy = sim.createDummy(0.02)
         sim.setObjectAlias(dummy, "CarroSTR")
         erros = []
         try:  # CoppeliaSim 4.8+: scripts são objetos da cena
@@ -203,13 +235,16 @@ class CenaCoppelia:
 
     def trocar(self, s):
         sim = self.sim
+        t0 = time.perf_counter()
         r = sim.callScriptFunction("str_trocar", self.script, s)
         try:
             sim.step()
         except AttributeError:
             self.cliente.step()
         r = dict(r or {})
-        r["t"] = sim.getSimulationTime()
+        if "t" not in r:  # script antigo na cena
+            r["t"] = sim.getSimulationTime()
+        self.tempos_ms.append((time.perf_counter() - t0) * 1000)
         return r
 
     def parar(self):
@@ -218,7 +253,14 @@ class CenaCoppelia:
             self.rodando = False
 
     def resumo(self):
-        return ""
+        v = sorted(self.tempos_ms)
+        self.tempos_ms = []
+        if not v:
+            return ""
+        acima = sum(1 for x in v if x > self.dt * 1000)
+        return (f"tempo por passo no CoppeliaSim: media {sum(v) / len(v):.1f} ms, "
+                f"p95 {v[int(0.95 * (len(v) - 1))]:.1f} ms, max {v[-1]:.1f} ms; "
+                f"{acima}/{len(v)} passos acima de {self.dt * 1000:.0f} ms")
 
 
 # ---------------------------------------------------------------- laço
@@ -229,10 +271,12 @@ def main():
     ap.add_argument("--zmq-porta", type=int, default=23000)
     ap.add_argument("--dt", type=float, default=0.01, help="passo da fisica em s (padrao 0.01; 0 = o da cena)")
     ap.add_argument("--falso", action="store_true", help="nao usa o CoppeliaSim (para testes)")
+    ap.add_argument("--recriar", action="store_true",
+                    help="apaga /CarroSTR, /CarroEV e /Pista e monta de novo com o cena_carro.lua atual")
     ap.add_argument("--sair-no-fim", action="store_true", help="encerra quando o sim_bus terminar")
     a = ap.parse_args()
 
-    cena = CenaFalsa(a.dt or 0.01) if a.falso else CenaCoppelia(a.zmq_host, a.zmq_porta, a.dt)
+    cena = CenaFalsa(a.dt or 0.01) if a.falso else CenaCoppelia(a.zmq_host, a.zmq_porta, a.dt, a.recriar)
 
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.bind(("127.0.0.1", a.porta))

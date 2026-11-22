@@ -125,6 +125,20 @@ local function construirCarro()
     return chassi
 end
 
+-- A câmera da vista principal muda de nome entre versões: tenta pelo nome e,
+-- se não achar, pega a primeira câmera da cena.
+local function acharCamera()
+    local ok, cam = existe('/DefaultCamera')
+    if ok then return cam end
+    for _, tipo in ipairs({'sceneobject_camera', 'object_camera_type'}) do
+        if sim[tipo] then
+            local okL, lista = pcall(sim.getObjectsInTree, sim.handle_scene, sim[tipo])
+            if okL and lista and #lista > 0 then return lista[1] end
+        end
+    end
+    return nil
+end
+
 local function pegarHandles()
     local h = C.h
     h.chassi = sim.getObject('/CarroEV')
@@ -133,8 +147,7 @@ local function pegarHandles()
     for _, n in ipairs({'ignicao', 'painel', 'alarme', 'bloqueio', 'bateria', 'enlace'}) do
         h[n] = sim.getObject('/CarroEV/led_' .. n)
     end
-    local ok, cam = existe('/DefaultCamera')
-    h.camera = ok and cam or nil
+    h.camera = acharCamera()
 end
 
 -- ------------------------------------------------------------ interface
@@ -249,6 +262,7 @@ function str_trocar(s)
     return {
         ign = C.ign and 1 or 0, pai = C.pai and 1 or 0, ped = C.ped, desc = C.desc and 1 or 0,
         w = wRoda(), vel = velocidadeCarro(), cmd = cmd,
+        t = sim.getSimulationTime(), -- evita uma chamada ZeroMQ a mais por passo
     }
 end
 
