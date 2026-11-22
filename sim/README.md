@@ -36,7 +36,7 @@ cmake --build sim/build
 ctest --test-dir sim/build --output-on-failure
 ```
 
-São 16 testes:
+São 18 testes:
 
 | Teste | O que prova |
 |---|---|
@@ -49,6 +49,8 @@ São 16 testes:
 | `falha_*_reprova` | com falha injetada na ESP virtual, o verificador **tem que** reprovar |
 | `enlace_udp_dois_processos` | ponte e ESP virtual em processos separados, sockets reais, tempo real |
 | `ponte_coppelia_simulador_falso` | cadeia até o adaptador do CoppeliaSim (cena falsa); torque = 0 sempre que bloqueado |
+| `cenario_C7_percurso_completo` | corrida de 45 s com todas as situações, aprovada nas 8 regras |
+| `teste_extenso_cena_falsa` | a ferramenta de conferência física (seção 3.1) roda e aprova com a cena falsa |
 
 ## 2. Rodar os cenários e ver os gráficos
 
@@ -95,6 +97,35 @@ carro perde velocidade por inércia.
 
 Sem a ponte, a cena também anda sozinha pelo acelerador, sem ESP e sem
 bloqueio. Serve para conferir a cena isoladamente.
+
+### 3.1 Teste extenso: o que o carro fez de verdade
+
+O relatório do `sim_bus` só fala dos prazos da ESP. Para conferir também a
+física, com o CoppeliaSim aberto e **sem** outra ponte rodando:
+
+```bash
+python sim/ferramentas/teste_extenso.py            # use --recriar na primeira vez
+```
+
+Ele abre a ponte sozinho numa porta livre e roda o C7 (45 s, todas as
+situações). Antes, roda o mesmo cenário com o carro interno, como
+referência. Depois confere:
+
+| | Conferência |
+|---|---|
+| A | regras de prazo da ESP e enlace sem erro de CRC |
+| B | bloqueado ou sem ignição, o torque que **chegou ao CoppeliaSim** é zero |
+| C | tabela fase a fase: com torque acelera, sem torque não ganha velocidade, regeneração freia |
+| D | velocidade do CoppeliaSim × modelo interno (RMS e maior diferença) |
+| E | chassi em pé, dentro da pista, sem marcha a ré |
+| F | posição coerente com a velocidade integrada; patinagem das rodas motrizes |
+| G | passos atrasados, deriva entre o relógio da física e o real, e quem é o gargalo |
+
+Em `sim/resultados/<data>_extenso/` ficam o `relatorio.txt`, o
+`teste_extenso.png`, os CSVs do `sim_bus` e o `ponte_coppelia.csv`. Este
+último registra o lado do CoppeliaSim passo a passo: torque recebido,
+velocidade, posição e tempo de cada passo. Com `--esp serial:COM5`, faz o
+mesmo com a placa.
 
 ## 4. Tudo junto: CoppeliaSim + ESP32 física
 

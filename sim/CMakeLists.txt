@@ -94,5 +94,11 @@ if(Python3_FOUND)
            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/testes/teste_ponte_coppelia.py
                    ${CMAKE_CURRENT_SOURCE_DIR}/coppelia/ponte_coppelia.py $<TARGET_FILE:sim_bus>
                    ${CMAKE_CURRENT_SOURCE_DIR}/testes/cenario_curto.txt)
-  set_tests_properties(enlace_udp_dois_processos ponte_coppelia_simulador_falso PROPERTIES TIMEOUT 120)
+  # Teste extenso (conferencia fisica + tempo) com a cena falsa: prova a ferramenta.
+  add_test(NAME teste_extenso_cena_falsa
+           COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/ferramentas/teste_extenso.py --falso
+                   --sem-grafico --cenario ${CMAKE_CURRENT_SOURCE_DIR}/testes/cenario_curto.txt
+                   --saida ${CMAKE_CURRENT_BINARY_DIR}/teste_extenso)
+  set_tests_properties(enlace_udp_dois_processos ponte_coppelia_simulador_falso teste_extenso_cena_falsa
+                       PROPERTIES TIMEOUT 120)
 endif()

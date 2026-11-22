@@ -36,6 +36,51 @@ struct ResolucaoTimer {
   }
 };
 
+// Espera até 'alvo' com precisão de ~0,1 ms. Só o sleep (mesmo com
+// timeBeginPeriod) não basta: no Windows 11 um processo de console sem janela
+// visível pode continuar acordando em fatias de 15,6 ms, e metade dos passos de
+// 10 ms saía atrasada. Timer de alta resolução até ~0,5 ms antes, depois espera ativa.
+class Despertador {
+public:
+  Despertador() {
+#ifdef _WIN32
+#ifndef CREATE_WAITABLE_TIMER_HIGH_RESOLUTION
+#define CREATE_WAITABLE_TIMER_HIGH_RESOLUTION 0x00000002
+#endif
+    timer_ = CreateWaitableTimerExW(nullptr, nullptr, CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, TIMER_ALL_ACCESS);
+#endif
+  }
+  ~Despertador() {
+#ifdef _WIN32
+    if (timer_) CloseHandle(timer_);
+#endif
+  }
+  void esperarAte(std::chrono::steady_clock::time_point alvo) {
+    using namespace std::chrono;
+    const auto folga = microseconds(500);
+    auto falta = alvo - steady_clock::now();
+    if (falta > folga) {
+#ifdef _WIN32
+      if (timer_) {
+        LARGE_INTEGER due;
+        due.QuadPart = -static_cast<LONGLONG>(duration_cast<microseconds>(falta - folga).count() * 10); // 100 ns, relativo
+        if (SetWaitableTimer(timer_, &due, 0, nullptr, nullptr, FALSE)) WaitForSingleObject(timer_, INFINITE);
+      } else {
+        std::this_thread::sleep_until(alvo - folga);
+      }
+#else
+      std::this_thread::sleep_until(alvo - folga);
+#endif
+    }
+    while (steady_clock::now() < alvo) std::this_thread::yield();
+  }
+
+private:
+#ifdef _WIN32
+  HANDLE timer_ = nullptr;
+#endif
+};
+
 struct ComandoFila {
   int cmd;
   uint64_t t_emitido_us;
@@ -85,6 +130,7 @@ ResumoExecucao executar(Planta &planta, Enlace &enlace, const Cenario *cenario, 
   std::vector<uint64_t> t_envio(1024, 0); // seq -> instante de envio
   uint32_t ultimo_seq_eco = UINT32_MAX;
 
+  Despertador despertador;
   const auto inicio = std::chrono::steady_clock::now();
   uint64_t t_us = 0;
 
@@ -94,7 +140,7 @@ ResumoExecucao executar(Planta &planta, Enlace &enlace, const Cenario *cenario, 
       const auto alvo = inicio + std::chrono::microseconds(k * dt_us);
       auto agora = std::chrono::steady_clock::now();
       if (agora < alvo) {
-        std::this_thread::sleep_until(alvo);
+        despertador.esperarAte(alvo);
         agora = std::chrono::steady_clock::now();
       }
       t_us = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(agora - inicio).count());

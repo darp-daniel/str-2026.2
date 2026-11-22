@@ -75,6 +75,7 @@ class CenaFalsa:
     def __init__(self, dt):
         self.dt = dt
         self.t = 0.0
+        self.x = 0.0
         self.ign, self.pai, self.ped, self.vel = 0, 1, 0.0, 0.0
         self.passos = 0
         self.torque_com_bloqueio_max = 0.0
@@ -85,6 +86,7 @@ class CenaFalsa:
 
     def iniciar(self):
         self.t = 0.0
+        self.x = 0.0
 
     def trocar(self, s):
         if s.get("f_ign", -1) >= 0:
@@ -99,10 +101,12 @@ class CenaFalsa:
             self.torque_com_bloqueio_max = max(self.torque_com_bloqueio_max, abs(T))
         F = T / 0.31 - 0.5 * 1.2 * 0.3 * 2.2 * self.vel ** 2 - (0.012 * 1500 * 9.81 if self.vel > 0 else 0)
         self.vel = max(0.0, self.vel + F / 1500 * self.dt)
+        self.x += self.vel * self.dt
         self.t += self.dt
         self.passos += 1
         return {"ign": self.ign, "pai": self.pai, "ped": self.ped, "w": self.vel / 0.31,
-                "vel": self.vel, "cmd": 0, "desc": 0, "t": self.t}
+                "vel": self.vel, "cmd": 0, "desc": 0, "t": self.t,
+                "x": self.x, "y": 0.0, "z": 0.75}
 
     def parar(self):
         pass
@@ -266,7 +270,8 @@ class CenaCoppelia:
 # ---------------------------------------------------------------- laço
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--porta", type=int, default=5010, help="porta UDP onde o sim_bus fala (padrao 5010)")
+    ap.add_argument("--porta", type=int, default=5010,
+                    help="porta UDP onde o sim_bus fala (padrao 5010; 0 = escolhe uma livre e imprime)")
     ap.add_argument("--zmq-host", default="localhost")
     ap.add_argument("--zmq-porta", type=int, default=23000)
     ap.add_argument("--dt", type=float, default=0.01, help="passo da fisica em s (padrao 0.01; 0 = o da cena)")
@@ -274,6 +279,7 @@ def main():
     ap.add_argument("--recriar", action="store_true",
                     help="apaga /CarroSTR, /CarroEV e /Pista e monta de novo com o cena_carro.lua atual")
     ap.add_argument("--sair-no-fim", action="store_true", help="encerra quando o sim_bus terminar")
+    ap.add_argument("--log", help="CSV passo a passo do lado do CoppeliaSim (torque, velocidade, posicao, tempo)")
     a = ap.parse_args()
 
     cena = CenaFalsa(a.dt or 0.01) if a.falso else CenaCoppelia(a.zmq_host, a.zmq_porta, a.dt, a.recriar)
@@ -286,8 +292,14 @@ def main():
                  "(por exemplo o do --recriar). Feche-o com Ctrl+C naquele terminal, ou rode:\n"
                  "  Get-Process python | Stop-Process\n"
                  "e tente de novo. Se for outro programa, use --porta N aqui e no sim_bus --planta coppelia:N.")
-    print(f"ponte_coppelia: {cena.descricao()}, esperando o sim_bus em UDP {a.porta} (Ctrl+C sai)", flush=True)
+    porta = sock.getsockname()[1]
+    print(f"ponte_coppelia: {cena.descricao()}, esperando o sim_bus em UDP {porta} (Ctrl+C sai)", flush=True)
 
+    log = None
+    if a.log:
+        log = open(a.log, "w", encoding="utf-8", newline="")
+        log.write("passo,t_sim,torque,bloqueio,alarme,ign,ped,vel_ms,w_roda,x,y,z,ms_passo\n")
+    n_passo = 0
     ativo = False
     try:
         while True:
@@ -304,12 +316,23 @@ def main():
                     if not ativo:
                         cena.iniciar()
                         ativo = True
-                    resp = cena.trocar(saida_para_cena(m))
+                    s_cena = saida_para_cena(m)
+                    t0 = time.perf_counter()
+                    resp = cena.trocar(s_cena)
+                    if log:
+                        ms = (time.perf_counter() - t0) * 1000
+                        g = lambda k: resp.get(k, "")
+                        log.write(f"{n_passo},{g('t')},{s_cena.get('torque', 0):.2f},{s_cena.get('bloqueio', 0)},"
+                                  f"{s_cena.get('alarme', 0)},{g('ign')},{g('ped')},{g('vel')},{g('w')},"
+                                  f"{g('x')},{g('y')},{g('z')},{ms:.2f}\n")
+                    n_passo += 1
                     resp["ok"] = 1
                 elif op == "fim":
                     cena.parar()
                     ativo = False
                     print("sim_bus encerrou. " + cena.resumo(), flush=True)
+                    if log:
+                        log.flush()
                     if a.sair_no_fim:
                         return 0
                     continue
@@ -323,6 +346,8 @@ def main():
     finally:
         cena.parar()
         sock.close()
+        if log:
+            log.close()
     return 0
 
 

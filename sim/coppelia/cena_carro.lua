@@ -290,10 +290,12 @@ function str_trocar(s)
     atualizarTexto(s)
     local cmd = C.cmd
     C.cmd = 0
+    local p = sim.getObjectPosition(C.h.chassi, sim.handle_world) -- para o teste extenso
     return {
         ign = C.ign and 1 or 0, pai = C.pai and 1 or 0, ped = C.ped, desc = C.desc and 1 or 0,
         w = wRoda(), vel = velocidadeCarro(), cmd = cmd,
         t = sim.getSimulationTime(), -- evita uma chamada ZeroMQ a mais por passo
+        x = p[1], y = p[2], z = p[3],
     }
 end
 
