@@ -1,0 +1,8 @@
+# C2 - Violacao do painel com o carro andando
+# Criterios: alarme em <= 100 ms (T3); bloqueio 5 s depois do alarme
+# (janela 5000-5300 ms); com o bloqueio o torque e cortado e o carro desacelera.
+duracao 20
+0.0  painel 1
+0.5  ignicao 1
+1.0  pedal 0.3
+10.0 painel 0

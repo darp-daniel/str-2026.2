@@ -1,0 +1,9 @@
+# C4 - Comandos do usuario (T4)
+# Criterios: cada comando e confirmado em <= 30 ms, com o estado certo
+# (bloquear -> bloqueio=1, desbloquear -> bloqueio=0). Bloqueado, o carro perde tracao.
+duracao 12
+0.0  ignicao 1
+0.5  pedal 0.5
+5.0  comando bloquear
+8.0  comando desbloquear
+9.0  comando atualizar

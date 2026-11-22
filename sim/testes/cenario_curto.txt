@@ -1,0 +1,8 @@
+# Cenario curto para os testes em tempo real (enlace UDP e ponte do CoppeliaSim).
+# Cobre T5 (ignicao), T4 (comandos), T3 (alarme) e o bloqueio de 5 s.
+duracao 8
+0.0 ignicao 1
+0.3 pedal 0.5
+1.0 comando bloquear
+1.5 comando desbloquear
+2.0 painel 0

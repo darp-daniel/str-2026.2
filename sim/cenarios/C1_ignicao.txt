@@ -1,0 +1,8 @@
+# C1 - Ignicao e atualizacao do dashboard
+# Criterio: o dashboard (ignicao_eco) acompanha a chave em <= 200 ms (T5).
+duracao 10
+0.0  painel 1
+2.0  ignicao 1
+2.5  pedal 0.4
+6.0  pedal 0
+7.0  ignicao 0
