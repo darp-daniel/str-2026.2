@@ -259,8 +259,20 @@ function ui_atualizar() C.cmd = 3 end
 local function aplicarTorque(T)
     local h = C.h
     local por_roda = math.abs(T) / 2
+    -- A junta está em modo velocidade com força máxima = torque pedido: enquanto
+    -- a roda gira abaixo do alvo, o motor entrega exatamente T. O alvo faz o
+    -- papel do controle de tração (TCS) e do ABS de um carro elétrico real: a
+    -- roda pode girar no máximo 5 % + 2 rad/s acima do que o carro anda (antes,
+    -- alvo fixo de 300 rad/s: a roda disparava ao perder aderência, patinagem
+    -- de até 1290 % no teste extenso) e, freando, não trava.
+    local lin = sim.getObjectVelocity(h.chassi)
+    local w_carro = math.sqrt(lin[1] ^ 2 + lin[2] ^ 2) / RAIO
     local alvo = 0
-    if T > 0 then alvo = SENTIDO * 300 end -- velocidade alta: quem limita é a força
+    if T > 0 then
+        alvo = SENTIDO * (w_carro * 1.05 + 2.0)
+    elseif T < 0 then
+        alvo = SENTIDO * math.max(0, w_carro * 0.90 - 1.0)
+    end
     for _, j in ipairs({h.te, h.td}) do
         sim.setJointTargetVelocity(j, alvo)
         sim.setJointTargetForce(j, por_roda)
@@ -355,18 +367,20 @@ function sysCall_actuation()
     sim.addForceAndTorque(h.chassi, {-k * vh * lin[1], -k * vh * lin[2], 0}, nil)
 
     -- Motorista virtual: o carro não tem direção, e qualquer assimetria no
-    -- contato das rodas o desvia (no teste extenso ele saiu 37 m da faixa e
-    -- caiu da pista). Um controle PD suave faz o papel de quem segura o volante:
-    -- mantém y = 0 (centro da pista) e o carro apontado para +x.
+    -- contato das rodas o desvia (sem isto ele saiu 37 m da faixa e caiu da
+    -- pista). Ele ESTERÇA, como quem segura o volante: mira um ponto no centro
+    -- da pista alguns metros à frente e corrige só o rumo (torque de guinada).
+    -- Empurrar o chassi de lado arrastava os pneus e freava o carro.
     if C.motorista then
         local p = sim.getObjectPosition(h.chassi, sim.handle_world)
         local m = sim.getObjectMatrix(h.chassi, sim.handle_world)
-        local guinada = math.atan(m[5], m[1])           -- eixo x do carro no plano
+        local guinada = math.atan(m[5], m[1])            -- eixo x do carro no plano
         local _, ang = sim.getObjectVelocity(h.chassi)
-        local M, Iz = 1580, 2600                        -- massa e inércia de guinada (aprox.)
-        local Fy = M * (-1.0 * p[2] - 2.0 * lin[2])     -- wn = 1 rad/s, amortecimento crítico
-        local Tz = Iz * (-4.0 * guinada - 4.0 * ang[3]) -- wn = 2 rad/s
-        sim.addForceAndTorque(h.chassi, {0, Fy, 0}, {0, 0, Tz})
+        local olhar = math.max(8.0, 1.5 * vh)             -- distância do ponto mirado (m)
+        local rumo = math.atan(-p[2], olhar)              -- rumo que leva de volta ao centro
+        local Iz = 2600                                   -- inércia de guinada (aprox.)
+        local Tz = Iz * (-4.0 * (guinada - rumo) - 4.0 * ang[3]) -- wn = 2 rad/s
+        sim.addForceAndTorque(h.chassi, nil, {0, 0, Tz})
     end
 
     -- Modo autônomo: sem a ponte há mais de 0,5 s, o acelerador age direto.
