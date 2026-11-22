@@ -61,8 +61,24 @@ end
 -- ------------------------------------------------------------ construção
 local OPT_RESPONDABLE, OPT_STATIC = 8, 16
 
+-- O CoppeliaSim 4.10 ignora os bits respondable/static de createPrimitiveShape
+-- (tudo nascia estático: o carro ficava congelado no ar). Então define de novo,
+-- explicitamente, pelo parâmetro antigo e pelas propriedades do 4.8+.
+local function fisica(h, opcoes)
+    local resp = (opcoes or 0) & OPT_RESPONDABLE ~= 0
+    local estatica = (opcoes or 0) & OPT_STATIC ~= 0
+    pcall(sim.setObjectInt32Param, h, sim.shapeintparam_static, estatica and 1 or 0)
+    pcall(sim.setObjectInt32Param, h, sim.shapeintparam_respondable, resp and 1 or 0)
+    if sim.setBoolProperty then
+        pcall(sim.setBoolProperty, h, 'dynamic', not estatica)
+        pcall(sim.setBoolProperty, h, 'respondable', resp)
+    end
+    pcall(sim.resetDynamicObject, h)
+end
+
 local function forma(tipo, tam, pos, rgb, massa, nome, opcoes)
     local h = sim.createPrimitiveShape(tipo, tam, opcoes)
+    fisica(h, opcoes)
     setPos(h, pos)
     if rgb then cor(h, rgb) end
     if massa then sim.setShapeMass(h, massa) end
@@ -121,8 +137,9 @@ local function construirCarro()
 
     local chassi = forma(sim.primitiveshape_cuboid, {4.2, 1.8, 0.5}, {0, 0, 0.75}, {0.10, 0.35, 0.75}, 1500,
                          'CarroEV', OPT_RESPONDABLE)
-    local cabine = forma(sim.primitiveshape_cuboid, {2.0, 1.6, 0.45}, {-0.3, 0, 1.22}, {0.75, 0.85, 0.95}, 50,
-                         'cabine', OPT_RESPONDABLE)
+    -- visual: estática presa ao chassi (dinâmica solta cairia do carro)
+    local cabine = forma(sim.primitiveshape_cuboid, {2.0, 1.6, 0.45}, {-0.3, 0, 1.22}, {0.75, 0.85, 0.95}, nil,
+                         'cabine', OPT_STATIC)
     sim.setObjectParent(cabine, chassi, true)
 
     roda(chassi, 'TE', -1.35, 1.02, true)

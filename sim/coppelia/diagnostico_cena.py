@@ -50,8 +50,10 @@ def main():
 
     shape_t = tentar(lambda: sim.sceneobject_shape, None) or tentar(lambda: sim.object_shape_type, 0)
     joint_t = tentar(lambda: sim.sceneobject_joint, None) or tentar(lambda: sim.object_joint_type, 1)
-    print("\nobjetos do carro:")
-    for h in sim.getObjectsInTree(chassi):
+    estatica_chassi = tentar(lambda: sim.getObjectInt32Param(chassi, sim.shapeintparam_static))
+    pista = tentar(lambda: sim.getObject("/Pista"))
+    print("\nobjetos do carro (e a pista):")
+    for h in list(sim.getObjectsInTree(chassi)) + ([pista] if pista is not None else []):
         nome = tentar(lambda: sim.getObjectAlias(h), str(h))
         tipo = sim.getObjectType(h)
         p = sim.getObjectPosition(h, sim.handle_world)
@@ -109,7 +111,12 @@ def main():
     # ---------------------------------------------------------- 3. diagnóstico
     print("\nconclusao:")
     esperado = 0.5 * (2000 / 0.31 / 1540) * 9  # ~26 m em 3 s sem perdas
-    if desloc > 3:
+    if estatica_chassi == 1:
+        print("  O CHASSI ESTA ESTATICO: a fisica nao mexe nele (fica congelado no ar).")
+        print("  A cena foi criada por uma versao antiga do script. Recrie com:")
+        print("    python sim/coppelia/ponte_coppelia.py --recriar   (depois Ctrl+C)")
+        print("  e rode este diagnostico de novo.")
+    elif desloc > 3:
         print(f"  A FISICA ESTA OK: com torque o carro anda ({desloc:.1f} m; ideal ~{esperado:.0f} m).")
         print("  O problema esta no controle. Confira na janela 'Carro STR':")
         print("   - 'Ignicao ligada' marcada? sem ignicao o torque e zero;")
