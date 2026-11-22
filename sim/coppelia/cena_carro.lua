@@ -34,7 +34,7 @@ local RAIO = 0.31          -- m (igual ao modelo C++)
 local TORQUE_SEM_PONTE = 2000 -- N·m nas rodas com o pedal no fundo (modo autônomo)
 
 local C = {
-    ign = false, pai = true, ped = 0.0, desc = false, camera = true, cmd = 0,
+    ign = false, pai = true, ped = 0.0, desc = false, camera = true, cmd = 0, motorista = true,
     ultimaTroca = -1, carroAnt = nil, ui = nil, h = {},
 }
 
@@ -76,6 +76,26 @@ local function fisica(h, opcoes)
     pcall(sim.resetDynamicObject, h)
 end
 
+-- Atrito pneu-asfalto. Com o padrão do Bullet (~0,7 x 0,7 = 0,5 combinado) as
+-- rodas traseiras patinavam com o torque do C7 (teste extenso: patinagem
+-- mediana de 119 %) e, sem aderência lateral, o carro escorregava para fora
+-- da pista. Define em todos os motores, cada um pelo nome que ele usa.
+local MU_PNEU = 1.0
+local function atrito(h, mu)
+    for _, nome in ipairs({'bullet_body_friction', 'ode_body_friction', 'newton_body_staticfriction',
+                           'newton_body_kineticfriction'}) do
+        if sim[nome] then pcall(sim.setEngineFloatParam, sim[nome], h, mu) end
+    end
+    if sim.setFloatProperty then
+        for _, nome in ipairs({'bullet.friction', 'ode.friction', 'newton.staticFriction',
+                               'newton.kineticFriction'}) do
+            pcall(sim.setFloatProperty, h, nome, mu)
+        end
+    end
+    if sim.setVector3Property then pcall(sim.setVector3Property, h, 'mujoco.friction', {mu, 0.005, 0.0001}) end
+    pcall(sim.resetDynamicObject, h)
+end
+
 local function forma(tipo, tam, pos, rgb, massa, nome, opcoes)
     local h = sim.createPrimitiveShape(tipo, tam, opcoes)
     fisica(h, opcoes)
@@ -105,6 +125,7 @@ local function roda(chassi, nome, x, y, motriz)
     end
     local r = forma(sim.primitiveshape_cylinder, {d, d, l}, {x, y, RAIO}, {0.1, 0.1, 0.1}, 20,
                     'roda_' .. nome, OPT_RESPONDABLE)
+    atrito(r, MU_PNEU)
     setOri(r, {-math.pi / 2, 0, 0})
     sim.setObjectParent(r, j, true)
     sim.setObjectParent(j, chassi, true)
@@ -119,6 +140,7 @@ local function construirCarro()
     if not existe('/Pista') then
         local pista = forma(sim.primitiveshape_cuboid, {2000, 12, 0.1}, {995, 0, -0.049}, {0.35, 0.35, 0.38}, nil,
                             'Pista', OPT_RESPONDABLE + OPT_STATIC)
+        atrito(pista, MU_PNEU)
         -- faixas brancas a cada 10 m e marcos coloridos a cada 100 m: sem elas,
         -- com a câmera seguindo o carro, a pista lisa parece não se mover
         local faixas = {}
@@ -319,6 +341,21 @@ function sysCall_actuation()
     local k = 0.5 * 1.2 * 0.30 * 2.2
     local vh = math.sqrt(lin[1] ^ 2 + lin[2] ^ 2)
     sim.addForceAndTorque(h.chassi, {-k * vh * lin[1], -k * vh * lin[2], 0}, nil)
+
+    -- Motorista virtual: o carro não tem direção, e qualquer assimetria no
+    -- contato das rodas o desvia (no teste extenso ele saiu 37 m da faixa e
+    -- caiu da pista). Um controle PD suave faz o papel de quem segura o volante:
+    -- mantém y = 0 (centro da pista) e o carro apontado para +x.
+    if C.motorista then
+        local p = sim.getObjectPosition(h.chassi, sim.handle_world)
+        local m = sim.getObjectMatrix(h.chassi, sim.handle_world)
+        local guinada = math.atan(m[5], m[1])           -- eixo x do carro no plano
+        local _, ang = sim.getObjectVelocity(h.chassi)
+        local M, Iz = 1580, 2600                        -- massa e inércia de guinada (aprox.)
+        local Fy = M * (-1.0 * p[2] - 2.0 * lin[2])     -- wn = 1 rad/s, amortecimento crítico
+        local Tz = Iz * (-4.0 * guinada - 4.0 * ang[3]) -- wn = 2 rad/s
+        sim.addForceAndTorque(h.chassi, {0, Fy, 0}, {0, 0, Tz})
+    end
 
     -- Modo autônomo: sem a ponte há mais de 0,5 s, o acelerador age direto.
     if C.ultimaTroca < 0 or sim.getSystemTime() - C.ultimaTroca > 0.5 then

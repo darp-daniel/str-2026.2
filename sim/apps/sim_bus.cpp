@@ -80,6 +80,8 @@ int main(int argc, char **argv) {
   }
 
   std::signal(SIGINT, [](int) { g_parar = true; });
+  // Sem buffer: lido por um pipe (teste_extenso.py) a saida aparece na hora, nao so no fim.
+  std::setvbuf(stdout, nullptr, _IONBF, 0);
 
   try {
     Cenario cen;

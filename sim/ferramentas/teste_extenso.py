@@ -303,6 +303,10 @@ def analisar(args, rel, rc, saida_bus, csv_c, csv_ref, log_ponte, saida_ponte):
                  f"altura do centro {zmin:.3f} a {zmax:.3f} m (montado em 0,75)")
         rel.item("E", "na pista", "OK" if max(abs(v) for v in y) < 5 else "FALHA",
                  f"desvio lateral max {max(abs(v) for v in y):.2f} m (pista de 12 m)")
+        fora = next((i for i in range(n) if abs(y[i]) > 6 or z[i] < 0.5), None)
+        if fora is not None:
+            rel.p(f"         o carro SAIU DA PISTA em t={f(P[fora]['t_sim']):.1f} s, x={px[fora]:.1f} m, "
+                  f"y={y[fora]:.2f} m, z={z[fora]:.2f} m; o que vem depois disso nao vale")
         recuo = max(max(px[:i + 1]) - px[i] for i in range(n))
         rel.item("E", "sem marcha a re", "OK" if recuo < 0.3 else "FALHA", f"maior recuo em x {recuo:.2f} m")
         ts_p = [f(l.get("t_sim")) for l in P[:n]]

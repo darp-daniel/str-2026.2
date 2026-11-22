@@ -62,7 +62,10 @@ def main():
             est = tentar(lambda: sim.getObjectInt32Param(h, sim.shapeintparam_static))
             resp = tentar(lambda: sim.getObjectInt32Param(h, sim.shapeintparam_respondable))
             massa = tentar(lambda: sim.getShapeMass(h))
-            print(f"  forma  {nome:14s} estatica={est} respondable={resp} massa={massa} {pos}")
+            atr = tentar(lambda: sim.getEngineFloatParam(sim.bullet_body_friction, h))
+            atr = f"{atr:.2f}" if isinstance(atr, (int, float)) else "?"
+            print(f"  forma  {nome:14s} estatica={est} respondable={resp} massa={massa if massa is None else round(massa)} "
+                  f"atrito(bullet)={atr} {pos}")
         elif tipo == joint_t:
             modo = tentar(lambda: sim.getJointMode(h))
             ctrl = tentar(lambda: sim.getObjectInt32Param(h, sim.jointintparam_dynctrlmode))
