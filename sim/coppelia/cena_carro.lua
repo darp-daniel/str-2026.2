@@ -101,8 +101,22 @@ local function construirCarro()
 
     -- pista de 2 km ao longo de +x (o piso padrão da cena tem só 5 m)
     if not existe('/Pista') then
-        forma(sim.primitiveshape_cuboid, {2000, 12, 0.1}, {995, 0, -0.049}, {0.35, 0.35, 0.38}, nil, 'Pista',
-              OPT_RESPONDABLE + OPT_STATIC)
+        local pista = forma(sim.primitiveshape_cuboid, {2000, 12, 0.1}, {995, 0, -0.049}, {0.35, 0.35, 0.38}, nil,
+                            'Pista', OPT_RESPONDABLE + OPT_STATIC)
+        -- faixas brancas a cada 10 m e marcos coloridos a cada 100 m: sem elas,
+        -- com a câmera seguindo o carro, a pista lisa parece não se mover
+        local faixas = {}
+        for x = 0, 1990, 10 do
+            local largo = (x % 100 == 0)
+            local f = forma(sim.primitiveshape_cuboid, {largo and 0.6 or 3, largo and 12 or 0.15, 0.01},
+                            {x, 0, 0.006}, largo and {0.95, 0.75, 0.1} or {0.95, 0.95, 0.95}, nil, 'faixa',
+                            OPT_STATIC)
+            faixas[#faixas + 1] = f
+        end
+        local ok, grupo = pcall(sim.groupShapes, faixas) -- 1 objeto em vez de 200
+        local marcas = ok and grupo or faixas[1]
+        if ok then sim.setObjectAlias(grupo, 'Faixas') end
+        sim.setObjectParent(marcas, pista, true)
     end
 
     local chassi = forma(sim.primitiveshape_cuboid, {4.2, 1.8, 0.5}, {0, 0, 0.75}, {0.10, 0.35, 0.75}, 1500,
