@@ -1,0 +1,16 @@
+# C6 - Rajada de 10 comandos em 100 ms
+# Expoe o problema da taxa de chegada de T4 (analise de tempo de resposta):
+# a ponte manda um comando por vez e so libera o proximo depois do eco, entao
+# a latencia de cada um inclui a espera na fila.
+duracao 6
+0.0  ignicao 1
+3.00 comando bloquear
+3.01 comando desbloquear
+3.02 comando atualizar
+3.03 comando bloquear
+3.04 comando desbloquear
+3.05 comando atualizar
+3.06 comando bloquear
+3.07 comando desbloquear
+3.08 comando atualizar
+3.09 comando bloquear

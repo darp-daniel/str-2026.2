@@ -1,0 +1,14 @@
+# C5 - Tudo ao mesmo tempo: violacao do painel + bateria critica
+#      + pedido de atualizacao do dashboard, com o carro acelerando forte.
+# Criterio: nenhum prazo perdido.
+#
+# Observacao: com o pedal no fundo, a queda de tensao R*I sozinha ja empurra o
+# pino abaixo dos limiares (bateria baixa em ~0,65 s, critica em ~3,06 s).
+# Isso e realista e o firmware precisa decidir se filtra/confirma a leitura.
+duracao 16
+0.0  soc 0.22
+0.0  descarga 8
+0.0  ignicao 1
+0.5  pedal 1.0
+3.0  painel 0
+3.0  comando atualizar

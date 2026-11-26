@@ -1,0 +1,19 @@
+# C7 - Percurso completo (teste extenso): todas as situacoes numa corrida so.
+# Criterios da ESP: T5 na ignicao, T4 nos comandos, T3/T2 na violacao.
+# Criterios fisicos (conferidos por ferramentas/teste_extenso.py):
+#   - sem ignicao o pedal nao move o carro;
+#   - com torque o carro acelera; bloqueado ou sem ignicao o torque e zero
+#     e o carro so perde velocidade;
+#   - pedal negativo freia (regeneracao) sem dar re.
+duracao 45
+0.0  painel 1
+0.0  ignicao 0
+0.5  pedal 0.5              # pedal com a ignicao desligada: carro parado
+3.0  ignicao 1              # acelera
+10.0 comando bloquear       # bloqueio pelo usuario em movimento: corte de torque
+14.0 comando desbloquear    # volta a acelerar
+20.0 pedal -0.6             # regeneracao: freia
+24.0 pedal 0.4              # acelera de novo
+28.0 ignicao 0              # desliga andando: torque zero, perde velocidade
+31.0 ignicao 1
+34.0 painel 0               # violacao: alarme <= 100 ms, bloqueio em ~39 s

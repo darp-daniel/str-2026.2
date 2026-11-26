@@ -1,0 +1,10 @@
+# C3 - Descarga acelerada ate os limiares de bateria
+# Criterios: V_pino <= 2,5 V -> bateria baixa em <= 100 ms (T3);
+#            V_pino <= 1,5 V -> bateria critica em <= 100 ms (T3).
+# A descarga e acelerada (fator 40) para caber em poucos segundos.
+duracao 20
+0.0  soc 0.27
+0.0  descarga 40
+0.0  dreno 30
+0.0  ignicao 1
+0.5  pedal 0.5

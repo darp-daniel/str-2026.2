@@ -1,0 +1,13 @@
+menu "STR Telemetria"
+
+    config STR_MODO_SIM
+        bool "Modo HIL: entradas vindas do simulador pela USB (UART0)"
+        default n
+        help
+            Desligado: teste de bancada (botoes nos GPIO18/19, rele no GPIO26).
+            Ligado: ignicao, painel, tensao da bateria e comandos do usuario
+            chegam do simulador (sim/ no repositorio) pela UART0, e a ESP
+            devolve o estado (bloqueio, alarme, nivel da bateria). O rele no
+            GPIO26 continua sendo acionado.
+
+endmenu
