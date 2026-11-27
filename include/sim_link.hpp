@@ -12,12 +12,19 @@
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
+#include "sdkconfig.h"
+#include <stdint.h>
 
 namespace sim_link {
 
 struct Comando {
   uint8_t cmd; // SIMP_CMD_*
   uint8_t id;
+
+#if !CONFIG_STR_MODO_SIM
+  int64_t t_rx_us;
+  int64_t t_fila_us;
+#endif
 };
 
 // Instala o driver da UART0 e cria a tarefa de recepção.

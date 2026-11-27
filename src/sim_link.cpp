@@ -4,6 +4,7 @@
 #include "esp_log.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
+#include "esp_timer.h"
 
 #if __has_include("driver/uart_vfs.h")
 #include "driver/uart_vfs.h" // ESP-IDF 5.3+
@@ -11,6 +12,8 @@
 #endif
 
 #include <cstring>
+#include <cctype>
+#include "sdkconfig.h"
 
 namespace sim_link {
 namespace {
@@ -27,29 +30,143 @@ SemaphoreHandle_t g_tx = nullptr;
 uint8_t g_ultimo_id = 0;
 
 void tarefaRx(void *) {
+
+#if CONFIG_STR_MODO_SIM
+
+  // MODO HIL - Código original do grupo
+
   SimpDecodificador dec;
   simp_decodificador_init(&dec);
   uint8_t buf[64];
+
   for (;;) {
-    int n = uart_read_bytes(PORTA, buf, sizeof buf, pdMS_TO_TICKS(20));
+    int n = uart_read_bytes(PORTA, buf, sizeof buf,
+                            pdMS_TO_TICKS(20));
+
     for (int i = 0; i < n; ++i) {
-      if (simp_alimentar(&dec, buf[i]) != SIMP_TIPO_SIM_PARA_ESP || dec.len != sizeof(SimParaEsp)) continue;
+      if (simp_alimentar(&dec, buf[i]) != SIMP_TIPO_SIM_PARA_ESP ||
+          dec.len != sizeof(SimParaEsp))
+        continue;
+
       SimParaEsp m;
       std::memcpy(&m, dec.payload, sizeof m);
+
       taskENTER_CRITICAL(&g_mux);
       g_ultimo = m;
       g_tem = true;
       taskEXIT_CRITICAL(&g_mux);
-      // A ponte repete o mesmo comando até ver o eco; só o primeiro vai para T4.
-      if (m.comando != SIMP_CMD_NENHUM && m.comando_id != g_ultimo_id) {
+
+      // A ponte repete o mesmo comando até ver o eco;
+      // só o primeiro vai para T4.
+      if (m.comando != SIMP_CMD_NENHUM &&
+          m.comando_id != g_ultimo_id) {
+
         g_ultimo_id = m.comando_id;
         Comando c{m.comando, m.comando_id};
-        if (xQueueSend(g_cmds, &c, 0) != pdTRUE) ESP_LOGW(TAG, "fila de comandos cheia");
+
+        if (xQueueSend(g_cmds, &c, 0) != pdTRUE)
+          ESP_LOGW(TAG, "fila de comandos cheia");
       }
     }
   }
+
+#else
+
+  // MODO FISICO - Recepcao de comandos pelo terminal
+
+  uint8_t buf[64];
+  char texto[32] = {};
+  size_t pos = 0;
+  uint8_t id = 0;
+  bool excesso = false;
+
+  ESP_LOGI(TAG, "Comandos disponiveis:");
+  ESP_LOGI(TAG, "BLOQUEAR");
+  ESP_LOGI(TAG, "DESBLOQUEAR");
+  ESP_LOGI(TAG, "ATUALIZAR");
+
+  for (;;) {
+
+    int n = uart_read_bytes(PORTA, buf, sizeof buf,
+                            pdMS_TO_TICKS(20));
+
+    for (int i = 0; i < n; ++i) {
+
+      char ch = static_cast<char>(buf[i]);
+
+// Ignora caracteres de controle, exceto Enter
+if (ch != '\r' && ch != '\n' &&
+    !std::isprint(static_cast<unsigned char>(ch))) {
+  continue;
 }
 
+// Converte letras minusculas em maiusculas
+ch = static_cast<char>(
+    std::toupper(static_cast<unsigned char>(ch))
+);
+
+      if (ch == '\r' || ch == '\n') {
+        const int64_t t_rx_us = esp_timer_get_time();
+
+        if (excesso) {
+          ESP_LOGW(TAG, "Comando muito longo");
+          excesso = false;
+          pos = 0;
+          continue;
+        }
+
+        if (pos == 0)
+          continue;
+
+        texto[pos] = '\0';
+
+        uint8_t cmd = SIMP_CMD_NENHUM;
+
+        if (std::strcmp(texto, "BLOQUEAR") == 0) {
+
+          cmd = SIMP_CMD_BLOQUEAR;
+
+        } else if (std::strcmp(texto, "DESBLOQUEAR") == 0) {
+
+          cmd = SIMP_CMD_DESBLOQUEAR;
+
+        } else if (std::strcmp(texto, "ATUALIZAR") == 0) {
+
+          cmd = SIMP_CMD_ATUALIZAR;
+
+        } else {
+
+          ESP_LOGW(TAG, "Comando invalido: [%s] | Tamanho: %u",
+                  texto, static_cast<unsigned>(pos));
+        }
+
+        if (cmd != SIMP_CMD_NENHUM) {
+
+          Comando c{cmd, ++id, t_rx_us, 0};
+
+          c.t_fila_us = esp_timer_get_time();
+
+          if (xQueueSend(g_cmds, &c, 0) != pdTRUE) {
+            ESP_LOGW(TAG, "fila de comandos cheia");
+          }
+        }
+
+        pos = 0;
+
+      } else if (!excesso) {
+
+        if (pos < sizeof(texto) - 1) {
+          texto[pos++] = ch;
+        } else {
+          excesso = true;
+        }
+      }
+    }
+  }
+
+#endif
+
+}
 } // namespace
 
 void iniciar(UBaseType_t prioridade_rx) {

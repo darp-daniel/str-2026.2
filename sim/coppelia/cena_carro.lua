@@ -244,26 +244,131 @@ local function pegarHandles()
 end
 
 -- ------------------------------------------------------------ interface
+
 local XML = [[
-<ui title="Carro STR" closeable="false" resizable="true" placement="relative" position="20,20" layout="vbox">
-    <label text="&lt;b&gt;Sensores do carro (vao para a ESP)&lt;/b&gt;"/>
-    <checkbox id="1" text="Ignicao ligada" on-change="ui_ignicao"/>
-    <checkbox id="2" text="Painel conforme (desmarque = violacao)" on-change="ui_painel"/>
-    <label text="Acelerador"/>
-    <hslider id="3" minimum="0" maximum="100" on-change="ui_pedal"/>
-    <checkbox id="4" text="Descarga rapida da bateria" on-change="ui_descarga"/>
-    <checkbox id="5" text="Camera acompanha o carro" on-change="ui_camera"/>
-    <label text="&lt;b&gt;Comandos do usuario (T4)&lt;/b&gt;"/>
-    <group layout="hbox" flat="true">
-        <button id="10" text="Bloquear" on-click="ui_bloquear"/>
-        <button id="11" text="Desbloquear" on-click="ui_desbloquear"/>
-        <button id="12" text="Atualizar" on-click="ui_atualizar"/>
+<ui title="STR - Telemetria Veicular"
+    closeable="false"
+    resizable="true"
+    placement="relative"
+    position="20,20"
+    layout="vbox">
+
+    <label
+        text="STR | TELEMETRIA VEICULAR"
+        style="font-size:20px;font-weight:bold;color:#2563eb;"/>
+
+    <label text="ESP32 | FreeRTOS | CoppeliaSim"/>
+
+    <group layout="vbox">
+
+        <label text="TELEMETRIA DO VEICULO"
+            style="font-size:14px;font-weight:bold;"/>
+
+        <label id="20"
+            text="Aguardando dados do veiculo..."
+            word-wrap="true"
+            style="font-size:14px;padding:8px;"/>
+
     </group>
-    <label id="20" text="" wordwrap="true"/>
-    <label id="21" text="" wordwrap="true"/>
-    <label text="Teto, da frente p/ tras: ignicao | painel | alarme | bloqueio | bateria | enlace ESP" wordwrap="true"/>
+
+    <group layout="vbox">
+
+        <label text="ESTADO DO SISTEMA"
+            style="font-size:14px;font-weight:bold;"/>
+
+        <label id="30" text="Ignicao: DESLIGADA"/>
+        <label id="31" text="Painel: CONFORME"/>
+        <label id="32" text="Alarme: SEM DADOS"/>
+        <label id="33" text="Bloqueio: SEM DADOS"/>
+        <label id="34" text="Bateria: SEM DADOS"/>
+
+        <label id="35"
+            text="ESP32: DESCONECTADO"
+            style="font-weight:bold;color:#dc2626;"/>
+
+        <label id="21"
+            text="Aguardando comunicacao..."
+            word-wrap="true"/>
+
+    </group>
+
+    <group layout="vbox">
+
+        <label text="CONTROLE DA SIMULACAO"
+            style="font-size:14px;font-weight:bold;"/>
+
+        <checkbox id="1"
+            text="Ignicao ligada"
+            on-change="ui_ignicao"/>
+
+        <checkbox id="2"
+            text="Painel conforme"
+            on-change="ui_painel"/>
+
+        <checkbox id="4"
+            text="Descarga rapida da bateria"
+            on-change="ui_descarga"/>
+
+        <checkbox id="5"
+            text="Camera acompanha o carro"
+            on-change="ui_camera"/>
+
+        <label id="36" text="Acelerador: 0%"/>
+
+        <hslider id="3"
+            minimum="0"
+            maximum="100"
+            on-change="ui_pedal"/>
+
+    </group>
+
+    <group layout="vbox">
+
+        <label text="COMANDOS DO USUARIO - T4"
+            style="font-size:14px;font-weight:bold;"/>
+
+        <group layout="hbox" flat="true">
+
+            <button id="10"
+                text="BLOQUEAR"
+                on-click="ui_bloquear"
+                style="background-color:#b91c1c;color:white;padding:8px;"/>
+
+            <button id="11"
+                text="DESBLOQUEAR"
+                on-click="ui_desbloquear"
+                style="background-color:#15803d;color:white;padding:8px;"/>
+
+            <button id="12"
+                text="ATUALIZAR"
+                on-click="ui_atualizar"
+                style="background-color:#2563eb;color:white;padding:8px;"/>
+
+        </group>
+
+    </group>
+
+    <group layout="vbox">
+
+        <label text="MONITORAMENTO TEMPORAL"
+            style="font-size:14px;font-weight:bold;"/>
+
+        <label text="Deadline T4: 30 ms"/>
+        <label id="40" text="Ultima resposta: -- ms"/>
+        <label id="41" text="Tempo maximo: -- ms"/>
+        <label id="42" text="Comandos confirmados: --"/>
+        <label id="43" text="Violacoes de deadline: --"/>
+
+    </group>
+
+    <label
+        text="Universidade de Brasilia - Sistemas de Tempo Real"
+        word-wrap="true"
+        style="font-size:10px;color:#64748b;"/>
+
 </ui>
 ]]
+
 
 local function sincronizarUi()
     if not C.ui then return end
@@ -352,19 +457,95 @@ end
 local MOTIVO = {[0] = 'nenhum', [1] = 'comando do usuario', [2] = 'violacao do painel', [3] = 'bateria critica'}
 local NIVEL = {[0] = 'normal', [1] = 'BAIXA', [2] = 'CRITICA'}
 
+
 local function atualizarTexto(s)
+
     if not C.ui then return end
-    local l1 = string.format('Velocidade %.1f km/h   torque %.0f N.m\nBateria: SOC %.1f %%   V_pino %.2f V   %.0f A',
-        velocidadeCarro() * 3.6, s.torque or 0, (s.soc or 0) * 100, s.v_pino or 0, s.corrente or 0)
-    local l2
-    if s.tem_rx == 1 then
-        l2 = string.format('ESP: bloqueio=%d (%s)  alarme=%d  bateria %s\n%s', s.bloqueio, MOTIVO[s.motivo] or '?',
-            s.alarme, NIVEL[s.nivel] or '?', s.status or '')
-    else
-        l2 = 'ESP: aguardando a primeira resposta...'
-    end
+
+    -- Telemetria do veiculo
+
+    local l1 = string.format(
+        'Velocidade: %.1f km/h\n' ..
+        'Torque: %.0f N.m\n' ..
+        'Bateria: %.1f %%\n' ..
+        'Tensao: %.2f V\n' ..
+        'Corrente: %.0f A',
+        velocidadeCarro() * 3.6,
+        s.torque or 0,
+        (s.soc or 0) * 100,
+        s.v_pino or 0,
+        s.corrente or 0
+    )
+
     simUI.setLabelText(C.ui, 20, l1)
-    simUI.setLabelText(C.ui, 21, l2)
+
+    -- Estados das entradas simuladas
+
+    simUI.setLabelText(
+        C.ui, 30,
+        'Ignicao: ' ..
+        (C.ign and 'LIGADA' or 'DESLIGADA')
+    )
+
+    simUI.setLabelText(
+        C.ui, 31,
+        'Painel: ' ..
+        (C.pai and 'CONFORME' or 'VIOLADO')
+    )
+
+    simUI.setLabelText(
+        C.ui, 36,
+        string.format('Acelerador: %.0f %%', C.ped * 100)
+    )
+
+    -- Estados recebidos do ESP32
+
+    if s.tem_rx == 1 then
+
+        simUI.setLabelText(
+            C.ui, 32,
+            'Alarme: ' ..
+            (s.alarme == 1 and 'ATIVO' or 'INATIVO')
+        )
+
+        simUI.setLabelText(
+            C.ui, 33,
+            'Bloqueio: ' ..
+            (s.bloqueio == 1 and 'ATIVO' or 'INATIVO')
+        )
+
+        simUI.setLabelText(
+            C.ui, 34,
+            'Bateria: ' ..
+            (NIVEL[s.nivel] or 'DESCONHECIDO')
+        )
+
+        simUI.setLabelText(
+            C.ui, 35,
+            'ESP32: RECEBENDO DADOS'
+        )
+
+        simUI.setLabelText(
+            C.ui, 21,
+            'Motivo do bloqueio: ' ..
+            (MOTIVO[s.motivo] or '?') ..
+            '\n' .. (s.status or '')
+        )
+
+    else
+
+        simUI.setLabelText(C.ui, 32, 'Alarme: SEM DADOS')
+        simUI.setLabelText(C.ui, 33, 'Bloqueio: SEM DADOS')
+        simUI.setLabelText(C.ui, 34, 'Bateria: SEM DADOS')
+        simUI.setLabelText(C.ui, 35, 'ESP32: DESCONECTADO')
+
+        simUI.setLabelText(
+            C.ui, 21,
+            'Aguardando resposta do ESP32...'
+        )
+
+    end
+
 end
 
 -- Chamada pela ponte (ponte_coppelia.py) uma vez por passo, ANTES de sim.step().

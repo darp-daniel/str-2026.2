@@ -7,9 +7,7 @@
 #include "alarm.hpp"
 #include "block.hpp"
 #include <chrono>
-#if CONFIG_STR_MODO_SIM
 #include "sim_link.hpp"
-#endif
 
 static const char *TAG="STR";
 static Block bloqueio(26,27); // GPIO 27 nao e usado: LED esta nos contatos do rele
@@ -22,6 +20,7 @@ static SemaphoreHandle_t g_mutex;
 static constexpr int PERIODO_MS = 50;
 
 #if CONFIG_STR_MODO_SIM
+
 static uint8_t g_nivel_bat = SIMP_BAT_NORMAL;
 static uint8_t g_cmd_eco = 0;
 
@@ -41,25 +40,91 @@ static void publicarEstado(const SimParaEsp &q) {
   sim_link::enviar(r);
 }
 
+#endif
+
 // T4 - Comando: esporadica, liberada pela chegada de um comando do usuario.
 static void tarefaComandos(void*) {
   sim_link::Comando c;
+
   for (;;) {
-    if (xQueueReceive(sim_link::filaComandos(), &c, portMAX_DELAY) != pdTRUE) continue;
+    if (xQueueReceive(sim_link::filaComandos(), &c, portMAX_DELAY) != pdTRUE)
+      continue;
+      #if !CONFIG_STR_MODO_SIM
+          const int64_t t_inicio_us = esp_timer_get_time();
+      #endif
+
     xSemaphoreTake(g_mutex, portMAX_DELAY);
+
     switch (c.cmd) {
-      case SIMP_CMD_BLOQUEAR: bloqueio.lockByUser(); break;
-      case SIMP_CMD_DESBLOQUEAR: bloqueio.unlock(); alarme.desativar(); break;
-      default: break; // ATUALIZAR: so publica o estado agora (T4 -> T5)
+      case SIMP_CMD_BLOQUEAR:
+        bloqueio.lockByUser();
+        break;
+
+      case SIMP_CMD_DESBLOQUEAR:
+        bloqueio.unlock();
+        alarme.desativar();
+        break;
+
+      default:
+        break; // ATUALIZAR: so publica o estado agora (T4 -> T5)
     }
+
+#if CONFIG_STR_MODO_SIM
+
     g_cmd_eco = c.id;
+
+#else
+
+    const bool alarmeOn = alarme.isActive();
+    const bool bloqOn = bloqueio.isBlocked();
+
+#endif
+
     xSemaphoreGive(g_mutex);
+
+#if CONFIG_STR_MODO_SIM
+
     SimParaEsp q{};
     sim_link::ultimoQuadro(q);
     publicarEstado(q);
+
+#else
+
+    const int64_t t_fim_us = esp_timer_get_time();
+
+const int64_t interpretacao_us =
+    c.t_fila_us - c.t_rx_us;
+
+const int64_t espera_us =
+    t_inicio_us - c.t_fila_us;
+
+const int64_t processamento_us =
+    t_fim_us - t_inicio_us;
+
+const int64_t resposta_us =
+    t_fim_us - c.t_rx_us;
+
+  ESP_LOGI(TAG,
+      "Comando=%u ID=%u Alarme=%s Bloqueio=%s",
+      static_cast<unsigned>(c.cmd),
+      static_cast<unsigned>(c.id),
+      alarmeOn ? "ON" : "OFF",
+      bloqOn ? "ON" : "OFF");
+
+  ESP_LOGI(TAG,
+      "C4 ID=%u | Interpretacao=%lld us | "
+      "Espera=%lld us | Processamento=%lld us | "
+      "Resposta=%lld us | Deadline interno=%s",
+      static_cast<unsigned>(c.id),
+      static_cast<long long>(interpretacao_us),
+      static_cast<long long>(espera_us),
+      static_cast<long long>(processamento_us),
+      static_cast<long long>(resposta_us),
+      resposta_us <= 30000 ? "OK" : "VIOLADO");
+
+#endif
   }
 }
-#endif
 
 static void tarefaSensores(void*) {
   bool ignicao=false, painel=true;
@@ -128,10 +193,13 @@ extern "C" void app_main(void) {
   bloqueio.init();
 #if CONFIG_STR_MODO_SIM
   ESP_LOGI(TAG,"Modo HIL: entradas vindas do simulador pela UART0");
-  sim_link::iniciar(10);                                            // recepcao: acima de tudo
-  xTaskCreate(tarefaComandos,"T4_comando",4096,nullptr,8,nullptr);  // T4: maior prioridade da aplicacao
 #else
-  ESP_LOGI(TAG,"Teste iniciado: pressione e solte GPIO19 para simular violacao");
+  ESP_LOGI(TAG,"Modo fisico: botoes e comandos pela UART0");
 #endif
+
+  sim_link::iniciar(10); // recepcao: acima de tudo
+
+  xTaskCreate(tarefaComandos,"T4_comando",4096,nullptr,8,nullptr); // T4: maior prioridade da aplicacao
+
   xTaskCreate(tarefaSensores,"sensores_alarme",4096,nullptr,5,nullptr);
 }
